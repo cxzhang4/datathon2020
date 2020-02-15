@@ -1,0 +1,101 @@
+---
+title: "Untitled"
+author: "Don Marco Loleng (loleng2)"
+date: "2/14/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+```{r}
+files <- c("Part 1.csv", "Part 2.csv", "Part 3.csv", "Part 4a.csv", "Part 4b.csv", "Part 5.csv")
+data.list <- lapply(files, read.csv)
+sales_data <- do.call(rbind, data.list)
+
+meta_data = read.csv("Metadata (1).csv")
+
+cbp_data = read.csv("cbp12us.txt")
+
+irs_zip_data = read.csv("12zpallagi.csv")
+
+
+View(cbp_data)
+View(irs_zip_data)
+View(sales_data)
+View(meta_data)
+```
+
+
+## DATA CLEANING/MANIPULATION
+
+```{r}
+# replace 001, 002, with 1, 2
+sales_data <- sales_data %>% 
+  as_tibble() %>%
+  mutate(RCPSZFE.id = str_replace(RCPSZFE.id, "00", "")) %>%
+  mutate(RCPSZFE.id = as.factor(RCPSZFE.id)) %>%
+  mutate(ESTAB = as.integer(ESTAB))
+
+# Extract "city" and "state from GEO.display.label and remove"
+sales_data <- sales_data %>%
+  mutate(city = str_remove_all(str_extract(GEO.display.label, "\\(.*,"), "\\(")) %>%
+  mutate(city = str_remove_all(city, ",")) %>%
+  mutate(state = str_extract(GEO.display.label, ", \\w\\w")) %>%
+  mutate(state = str_remove_all(state, ", ")) %>%
+  select(-c(GEO.display.label))
+# keep only 5 digit zip code, city, state
+sales_data <- select(sales_data, -GEO.id)
+# Remove year (ALL DATA IS FROM 2012)
+sales_data <- select(sales_data, -YEAR.id)
+
+# Sum "DispoIncome" = (taxable income)-(income tax) by zip code
+summed_zip_income <- irs_zip_data %>%
+  mutate(DispoIncome = (A04800 - A06500)) %>%
+  select(c(zipcode, DispoIncome)) %>%
+  mutate(zipcode = as.factor(zipcode)) %>%
+  group_by(zipcode) %>%
+  summarise(DispoIncome = sum(DispoIncome))
+
+# Join summed (taxable income)-(income tax) by zip code
+sales_inc_data <- sales_data %>%
+  mutate(zipcode = GEO.id2) %>%
+  inner_join(summed_zip_income, by="zipcode") %>%
+  select(-c(GEO.id2))
+
+# Extract "All Establishments" from "ESTAB" into new column "AllEstab"
+allestab <- sales_inc_data %>%
+  filter(RCPSZFE.id != "1") %>%
+  group_by(zipcode, NAICS.display.label) %>%
+  summarise(AllEstab = sum(ESTAB))
+
+# Get Proportion of Establishments in each bracket into "EstabProp"
+sales_inc_data = sales_inc_data %>%
+  filter(RCPSZFE.id != "1") %>%
+  inner_join(allestab, by = c("zipcode", "NAICS.display.label")) %>%
+  mutate(EstabProp = ESTAB / AllEstab)
+
+# Remove IDs, just keep text labels
+
+```
+
+
+
+
+```{r}
+sales_data %>%
+  filter(RCPSZFE.display.label == "Establishments operated entire year with sales/receipts/revenue of $500,000 to $999,999") %>%
+  mutate(GEO.display.label = fct_lump(GEO.display.label, 20)) %>%
+  filter(GEO.display.label != "Other") %>%
+  group_by(GEO.display.label) %>%
+  summarise(ESTAB = sum(ESTAB)) %>%
+  ggplot(aes(reorder(GEO.display.label, ESTAB), ESTAB)) +
+  coord_flip() +
+  geom_bar(stat = "identity")
+```
+
+
+
+Each row is a zip code, 

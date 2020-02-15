@@ -51,15 +51,15 @@ sales_data <- select(sales_data, -GEO.id)
 # Remove year (ALL DATA IS FROM 2012)
 sales_data <- select(sales_data, -YEAR.id)
 
-# Sum "DispoIncome" = (taxable income)-(income tax) by zip code
+# Sum "DispoIncome" = (taxable income)-(income tax) and totale number of tax returns by zip code
 summed_zip_income <- irs_zip_data %>%
   mutate(DispoIncome = (A04800 - A06500)) %>%
-  select(c(zipcode, DispoIncome)) %>%
+  select(c(zipcode, DispoIncome, N1)) %>%
   mutate(zipcode = as.factor(zipcode)) %>%
   group_by(zipcode) %>%
-  summarise(DispoIncome = sum(DispoIncome))
+  summarise(DispoIncome = sum(DispoIncome), NumReturns = sum(N1))
 
-# Join summed (taxable income)-(income tax) by zip code
+# Join summed DispoIncome and NumReturns by zip code
 sales_inc_data <- sales_data %>%
   mutate(zipcode = GEO.id2) %>%
   inner_join(summed_zip_income, by="zipcode") %>%
@@ -78,14 +78,32 @@ sales_inc_data = sales_inc_data %>%
   mutate(EstabProp = ESTAB / AllEstab)
 
 # Remove IDs, just keep text labels
-
+sales_inc_data = select(sales_inc_data, -c("NAICS.id", "RCPSZFE.id"))
+  
 ```
 
 
 
 
 ```{r}
-sales_data %>%
+test <- sales_inc_data %>%
+  filter(RCPSZFE.display.label == "Establishments operated entire year with sales/receipts/revenue less than $100,000") %>%
+  filter(AllEstab >= 10) %>%
+  arrange(desc(EstabProp), desc(DispoIncome))
+
+colnames(test)
+
+ggplot(data=test, aes(x=log(DispoIncome))) +
+geom_histogram(data = subset(test, EstabProp > .2), fill = "red", alpha = .2) +
+geom_histogram(data = subset(test, EstabProp <= .2), fill= "blue", alpha = .2)
+  
+
+
+
+
+
+
+sales_inc_data %>%
   filter(RCPSZFE.display.label == "Establishments operated entire year with sales/receipts/revenue of $500,000 to $999,999") %>%
   mutate(GEO.display.label = fct_lump(GEO.display.label, 20)) %>%
   filter(GEO.display.label != "Other") %>%
